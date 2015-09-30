@@ -4,7 +4,6 @@ _build
 /.ocp
 .DS_STORE
 docs/_site/
-bin
 npm-debug.log
 *.diff
 *.err
