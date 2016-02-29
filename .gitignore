@@ -5,7 +5,6 @@ _build
 .DS_STORE
 docs/_site/
 _site/
-bin
 npm-debug.log
 *.diff
 *.err
