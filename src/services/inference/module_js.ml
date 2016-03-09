@@ -22,6 +22,7 @@ module Ast = Spider_monkey_ast
 module Flow = Flow_js
 module Reason = Reason_js
 module ErrorSet = Errors_js.ErrorSet
+module FlowError = Flow_error
 
 module NameSet = Set.Make(Modulename)
 module NameMap = MyMap.Make(Modulename)
@@ -59,16 +60,17 @@ let replace_name_mapper_template_tokens =
 
 
 let choose_provider_and_warn_about_duplicates =
-  let is_flow_ext file = Loc.check_suffix file FlowConfig.flow_ext in
+  let is_flow_ext file = Loc.check_suffix file Files_js.flow_ext in
 
   let warn_duplicate_providers m current modules errmap =
     List.fold_left (fun acc f ->
-      let w = Flow.new_warning [
-        Reason.mk_reason m Loc.({ none with source = Some f }),
-          "Duplicate module provider";
-        Reason.mk_reason "current provider"
-          Loc.({ none with source = Some current }),
-          ""] in
+      let w = Errors_js.(mk_error ~kind:InferWarning [
+          Loc.({ none with source = Some f }), [
+            m; "Duplicate module provider"];
+          Loc.({ none with source = Some current }), [
+            "current provider"]
+        ])
+      in
       FilenameMap.add f (ErrorSet.singleton w) acc
     ) errmap modules in
 
@@ -275,7 +277,7 @@ and file_exists path =
     | None ->
         let files =
           if dir_exists dir
-          then Utils.set_of_list (Array.to_list (Sys.readdir dir))
+          then set_of_list (Array.to_list (Sys.readdir dir))
           else SSet.empty in
         files_in_dir := SMap.add dir files !files_in_dir;
         files
@@ -300,8 +302,8 @@ let lazy_seq: 'a option Lazy.t list -> 'a option =
 
 module Node = struct
   let exported_module file _ =
-    if Loc.check_suffix file FlowConfig.flow_ext
-    then Modulename.Filename (Loc.chop_suffix file FlowConfig.flow_ext)
+    if Loc.check_suffix file Files_js.flow_ext
+    then Modulename.Filename (Loc.chop_suffix file Files_js.flow_ext)
     else Modulename.Filename file
 
   let record_path path = function
@@ -315,7 +317,7 @@ module Node = struct
         not (dir_exists path)
     in fun ~options path_acc path ->
       let path = resolve_symlinks path in
-      let declaration_path = path ^ FlowConfig.flow_ext in
+      let declaration_path = path ^ Files_js.flow_ext in
       if path_exists ~options declaration_path ||
         path_exists ~options path
       then Some path
@@ -362,7 +364,7 @@ module Node = struct
               package_relative_to_root
           )
         in
-        Flow_js.add_error cx [(Reason.mk_reason "" loc, msg)];
+        FlowError.add_error cx (loc, [msg]);
         SMap.empty
       in
       let dir = Filename.dirname package in
@@ -473,9 +475,9 @@ module Haste: MODULE_SYSTEM = struct
       | None ->
           (* If foo.js.flow doesn't have a @providesModule, then look at foo.js
            * and use its @providesModule instead *)
-          if Loc.check_suffix file FlowConfig.flow_ext
+          if Loc.check_suffix file Files_js.flow_ext
           then
-            let file_without_flow_ext = Loc.chop_suffix file FlowConfig.flow_ext in
+            let file_without_flow_ext = Loc.chop_suffix file Files_js.flow_ext in
             if Parsing_service_js.has_ast file_without_flow_ext
             then
               let _, info =

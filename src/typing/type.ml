@@ -10,6 +10,7 @@
 
 open Reason_js
 open Utils_js
+module Errors = Errors_js
 
 (******************************************************************************)
 (* Types                                                                      *)
@@ -129,7 +130,7 @@ module rec TypeTerm : sig
     | TaintT of reason
 
     (* & types *)
-    | IntersectionT of reason * t list
+    | IntersectionT of reason * InterRep.t
 
     (* | types *)
     | UnionT of reason * UnionRep.t
@@ -262,7 +263,7 @@ module rec TypeTerm : sig
     | GetPropT of reason * propname * t
     | SetElemT of reason * t * t
     | GetElemT of reason * t * t
-    | ReposLowerT of reason * t
+    | ReposLowerT of reason * use_t
 
     (* operations on runtime types, such as classes and functions *)
     | ConstructorT of reason * t list * t
@@ -544,11 +545,39 @@ end = TypeTerm
 
 and UnionRep : sig
   type t
+
+  (** rep of empty union - synonymous with EmptyT but used to trigger
+      union-specific error messages *)
+  val empty: t
+
+  (** build a rep from list of members *)
   val make: TypeTerm.t list -> t
+
+  (** build new rep with tail of this one's members, preserving error
+      history and shifting head member to type history *)
+  val tail: t -> t
+
+  (** build new rep with error prepended to history *)
+  val record_error: Errors.error -> t -> t
+
+  (** enum base type, if any *)
   val enum_base: t -> TypeTerm.t option
+
+  (** members in declaration order *)
   val members: t -> TypeTerm.t list
+
+  (** type history in reverse speculation order *)
+  val history: t -> TypeTerm.t list
+
+  (** error history in reverse speculation order *)
+  val errors: t -> Errors.error list
+
+  (** map rep r to rep r' along type mapping f *)
   val map: (TypeTerm.t -> TypeTerm.t) -> t -> t
+
+  (** quick membership test: Some true/false or None = needs full check *)
   val quick_mem: TypeTerm.t -> t -> bool option
+
 end = struct
 
   (* canonicalize a type w.r.t. enum membership *)
@@ -586,13 +615,21 @@ end = struct
       | _ -> None
   )
 
-  (* union rep is:
-     - list of members in declaration order
-     - if union is an enum (set of singletons over a common base)
-       then Some (base, set)
-     (additional specializations probably to come)
+  (** union rep is:
+      - list of members in declaration order
+      - if union is an enum (set of singletons over a common base)
+        then Some (base, set)
+        (additional specializations probably to come)
+      - error history, used during speculation:
+        parallel lists of failed member types and their errors
    *)
-  type t = TypeTerm.t list * (TypeTerm.t * EnumSet.t) option
+  type t =
+    TypeTerm.t list *
+    (TypeTerm.t * EnumSet.t) option *
+    TypeTerm.t list *
+    Errors.error list
+
+  let empty = [], None, [], []
 
   (* helper: add t to enum set if base matches *)
   let acc_enum (base, tset) t =
@@ -601,41 +638,122 @@ end = struct
       Some (base, EnumSet.add t tset)
     | _ -> None
 
-(* given a list of members, build a rep.
-   specialized reps are used on compatible type lists *)
+  (** given a list of members, build a rep.
+      specialized reps are used on compatible type lists *)
   let make tlist =
-    tlist,
-    match tlist with
-    | [] | [_] -> None
-    | t :: ts ->
-      match base_of_t t with
-      | Some (_ as base) ->
-        ListUtils.fold_left_opt acc_enum (base, EnumSet.singleton t) ts
-      | _ -> None
+    let enum = match tlist with
+      | [] | [_] -> None
+      | t :: ts ->
+        match base_of_t t with
+        | Some (_ as base) ->
+          ListUtils.fold_left_opt acc_enum (base, EnumSet.singleton t) ts
+        | _ -> None
+    in
+    tlist, enum, [], []
 
-  (* rep's enum base type, if any *)
-  let enum_base (_, enum) =
+  let enum_base (_, enum, _, _) =
     match enum with
     | None -> None
     | Some (base, _) -> Some base
 
-  (* rep's list of members *)
-  let members (tlist, _) = tlist
+  let tail (ts, enum, hist, errs) =
+    match ts with
+    | [] -> ts, enum, hist, errs
+    | t :: ts ->  ts, enum, t :: hist, errs
 
-  (* map rep r to rep s along type mapping f *)
+  let record_error err (ts, enum, hist, errs) =
+    ts, enum, hist, err :: errs
+
+  let members (tlist, _, _, _) = tlist
+
+  let history (_, _, hist, _) = hist
+
+  let errors (_, _, _, errs) = errs
+
   let map f rep = make (List.map f (members rep))
 
-  (* quick membership test: Some true/false or None = needs full check *)
-  let quick_mem t rep =
+  let quick_mem t (tlist, enum, _, _) =
     let t = canon t in
-    match rep with
-    | tlist, None ->
+    match enum with
+    | None ->
       if List.mem t tlist then Some true else None
-    | _, Some (base, tset) ->
+    | Some (base, tset) ->
       match base_of_t t with
       | Some tbase when tbase = base ->
         Some (EnumSet.mem t tset)
       | _ -> Some false
+end
+
+(* We encapsulate IntersectionT's internal structure to
+   maintain error histories while speculating.
+
+   Representations are opaque. `make` chooses a
+   representation internally, and client code which
+   needs to interact with member types directly
+   can do so via `members`, which provides access
+   via the standard list representation.
+ *)
+
+and InterRep : sig
+  type t
+
+  (** rep of empty intersection: synonymous with MixedT, but used to
+      trigger intersection-specific error messages *)
+  val empty: t
+
+  (** build rep from list of members *)
+  val make: TypeTerm.t list -> t
+
+  (** build new rep with tail of this one's members, preserving error
+      history and shifting head member to type history *)
+  val tail: t -> t
+
+  (** build new rep with error prepended to history *)
+  val record_error: Errors.error -> t -> t
+
+  (** member list in declaration order *)
+  val members: t -> TypeTerm.t list
+
+  (** type history in reverse speculation order *)
+  val history: t -> TypeTerm.t list
+
+  (** error history in reverse speculation order *)
+  val errors: t -> Errors.error list
+
+  (** map rep r to rep r' along type mapping f. drops history *)
+  val map: (TypeTerm.t -> TypeTerm.t) -> t -> t
+
+end = struct
+  (** intersection rep is:
+      - member list in declaration order
+      - error history, used during speculation:
+        parallel lists of failed member types and their errors
+    *)
+  type t =
+    TypeTerm.t list *
+    TypeTerm.t list *
+    Errors.error list
+
+  let empty = [], [], []
+
+  let make ts = ts, [], []
+
+  let tail (ts, hist, errs) =
+    match ts with
+    | [] -> ts, hist, errs
+    | t :: ts ->  ts, t :: hist, errs
+
+  let record_error err (ts, hist, errs) =
+    ts, hist, err :: errs
+
+  let members (ts, _, _) = ts
+
+  let history (_, hist, _) = hist
+
+  let errors (_, _, errs) = errs
+
+  let map f rep = make (List.map f (members rep))
+
 end
 
 (* The typechecking algorithm often needs to maintain sets of types, or more

@@ -113,12 +113,30 @@ module MasterApi = struct
   let clear_shared_memory =
     SS.MasterApi.clear_shared_memory
 
-  let update_search_index files php_files =
-    let files = List.fold_left files ~f:begin fun acc file ->
-      Relative_path.Set.add file acc
-    end ~init:php_files in
+  let update_search_index files =
     SS.MasterApi.update_search_index files
 end
+
+(* This module does the same thing as MasterApi.update_search_index, but
+ * allows to process updates in small chunks instead of blocking the process
+ * for the entire duriation of index construction *)
+module IdeProcessApi = struct
+
+  let files_to_index = ref []
+  let batch_size = 1000
+
+  let enqueue_updates files =
+    files_to_index := files @ !files_to_index
+
+  let updates_pending () =
+    not (List.is_empty !files_to_index)
+
+  let process_updates () =
+    let files_to_process, files_remaining = List.split_n
+      !files_to_index batch_size in
+    SS.MasterApi.update_search_index files_to_process;
+    files_to_index := files_remaining
+  end
 
 let attach_hooks () =
   Parsing_hooks.attach_file_parsed_hook WorkerApi.update;

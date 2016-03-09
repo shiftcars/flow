@@ -189,16 +189,9 @@ let get_client_channels parent_in_fd =
   let socket = Libancillary.ancil_recv_fd parent_in_fd in
   (Timeout.in_channel_of_descr socket), (Unix.out_channel_of_descr socket)
 
-let run_ide_process ide_process =
+let ide_typechecker_init_done ide_process =
   Option.iter ide_process begin fun x ->
-    IdeProcessPipe.send x IdeProcessMessage.RunIdeCommands;
-  end
-
-let join_ide_process ide_process =
-  Option.iter ide_process begin fun x ->
-    IdeProcessPipe.send x IdeProcessMessage.StopIdeCommands;
-    match IdeProcessPipe.recv x with
-    | IdeProcessMessage.IdeCommandsDone -> ();
+    IdeProcessPipe.send x IdeProcessMessage.TypecheckerInitDone;
   end
 
 let ide_sync_files_info ide_process files_info =
@@ -218,18 +211,56 @@ let ide_update_files_info ide_process files_info updated_files_info =
     IdeProcessPipe.send x (IdeProcessMessage.SyncFileInfo updated_files_info);
   end
 
+let ide_update_error_list ide_process new_error_list old_error_list =
+  (* Compare the first few elements to catch the common case of just few errors
+   * existing, but short circuit when the list of errors is big. *)
+  let rec cheap_equals l1 l2 max_comparisons =
+    if max_comparisons = 0 then false else
+    match l1, l2 with
+      | [], [] -> true
+      | (h1::t1), (h2::t2) -> h1 = h2 && cheap_equals t1 t2 (max_comparisons-1)
+      | _ -> false
+    in
+  let cheap_equals l1 l2 = cheap_equals l1 l2 5 in
+
+  Option.iter ide_process begin fun x ->
+    if not (cheap_equals new_error_list old_error_list) then
+      IdeProcessPipe.send x (IdeProcessMessage.SyncErrorList new_error_list);
+  end
+
+let rec ide_recv_messages_loop ide_process genv env =
+  let ide_fd = ide_process.IdeProcessPipe.in_fd in
+  match Unix.select [ide_fd] [] [] 0.0 with
+  | [], _, _ -> ()
+  | _ ->
+    match IdeProcessPipe.recv ide_process with
+    | IdeProcessMessage.FindRefsCall (id, action) ->
+        let res = ServerFindRefs.go action genv env in
+        let msg = IdeProcessMessage.FindRefsResponse (id, res) in
+        IdeProcessPipe.send ide_process msg;
+        ide_recv_messages_loop ide_process genv env
+
+let ide_recv_messages genv env =
+  Option.iter genv.ide_process begin fun ide_process ->
+    ide_recv_messages_loop ide_process genv env
+  end
+
 let serve genv env in_fd _ =
   let env = ref env in
   let last_stats = ref empty_recheck_loop_stats in
   let recheck_id = ref (Random_id.short_string ()) in
   ide_sync_files_info genv.ide_process !env.files_info;
+  ide_update_error_list genv.ide_process !env.errorl [];
+  ide_typechecker_init_done genv.ide_process;
   while true do
     ServerMonitorUtils.exit_if_parent_dead ();
-    run_ide_process genv.ide_process;
+    SharedMem.hashtable_mutex_unlock ();
     let has_client = sleep_and_check in_fd in
     (* For now we only run IDE commands in idle loop, with plan to vet more
      * places where it's safe to do so in parallel. *)
-    join_ide_process genv.ide_process;
+    SharedMem.hashtable_mutex_lock ();
+    (* TODO: make waiting on IDE messages part of sleep_and_check *)
+    ide_recv_messages genv !env;
     let has_parsing_hook = !ServerTypeCheck.hook_after_parsing <> None in
     if not has_client && not has_parsing_hook
     then begin
@@ -248,16 +279,18 @@ let serve genv env in_fd _ =
     let start_t = Unix.gettimeofday () in
     HackEventLogger.with_id ~stage:`Recheck !recheck_id @@ fun () ->
     let stats, new_env = recheck_loop genv !env in
-    env := new_env;
     if stats.rechecked_count > 0 then begin
       HackEventLogger.recheck_end start_t has_parsing_hook
         stats.rechecked_batches
         stats.rechecked_count
         stats.total_rechecked_count;
-      Hh_logger.log "Recheck id: %s" !recheck_id;
       ide_update_files_info
-        genv.ide_process !env.files_info stats.reparsed_files
+        genv.ide_process new_env.files_info stats.reparsed_files;
+      ide_update_error_list
+        genv.ide_process new_env.errorl !env.errorl;
+      Hh_logger.log "Recheck id: %s" !recheck_id;
     end;
+    env := new_env;
     last_stats := stats;
     if has_client then
       (try
@@ -305,6 +338,7 @@ let program_init genv =
 
 let setup_server options ide_process =
   let root = ServerArgs.root options in
+  SharedMem.hashtable_mutex_lock ();
   (* The OCaml default is 500, but we care about minimizing the memory
    * overhead *)
   let gc_control = Gc.get () in
@@ -319,7 +353,6 @@ let setup_server options ide_process =
   if Sys_utils.is_test_mode ()
   then EventLogger.init (Daemon.devnull ()) 0.0
   else HackEventLogger.init root (Unix.gettimeofday ());
-
   let root_s = Path.to_string root in
   if Sys_utils.is_nfs root_s && not enable_on_nfs then begin
     Hh_logger.log "Refusing to run on %s: root is on NFS!" root_s;

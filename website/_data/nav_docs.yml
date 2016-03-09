@@ -24,18 +24,14 @@
     title: Using the CLI
   - id: advanced-configuration
     title: Advanced Configuration
-- title: Walkthroughs
-  items:
-  - id: react-example
-    title: A Flux & React demo
-  - id: underscore
-    title: Flow, meet Underscore
 - title: Language Reference
   items:
   - id: quick-reference
     title: Quick Reference
   - id: builtins
     title: Built-in Types
+  - id: syntax
+    title: Syntax
   - id: arrays
     title: Arrays and Tuples
   - id: classes
@@ -56,6 +52,8 @@
     title: Typeof types
   - id: dynamic-type-tests
     title: Dynamic Type Tests
+  - id: disjoint-unions
+    title: Disjoint Unions
   - id: modules
     title: Modules
   - id: declarations

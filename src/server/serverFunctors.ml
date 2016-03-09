@@ -26,7 +26,7 @@ module type SERVER_PROGRAM = sig
   val parse_options: unit -> Options.options
   val get_watch_paths: Options.options -> Path.t list
   val name: string
-  val handle_client : genv -> client -> unit
+  val handle_client : genv -> rechecked:bool -> client -> unit
 end
 
 let grab_lock ~tmp_dir root =
@@ -106,7 +106,7 @@ end = struct
     let ready_socket_l, _, _ = Unix.select [socket] [] [] (1.0) in
     ready_socket_l <> []
 
-  let handle_connection_ genv socket =
+  let handle_connection_ genv rechecked socket =
     let cli, _ = Unix.accept socket in
     let ic = Unix.in_channel_of_descr cli in
     let oc = Unix.out_channel_of_descr cli in
@@ -123,7 +123,7 @@ end = struct
         FlowExitStatus.exit FlowExitStatus.Build_id_mismatch
       end else msg_to_channel oc Connection_ok;
       let client = { ic; oc; close } in
-      Program.handle_client genv client
+      Program.handle_client genv rechecked client
     with
     | Sys_error("Broken pipe") ->
       shutdown_client (ic, oc)
@@ -134,9 +134,9 @@ end = struct
       Printexc.print_backtrace stderr;
       shutdown_client (ic, oc)
 
-  let handle_connection genv socket =
+  let handle_connection genv rechecked socket =
     ServerPeriodical.stamp_connection ();
-    try handle_connection_ genv socket
+    try handle_connection_ genv rechecked socket
     with
     | Unix.Unix_error (e, _, _) ->
         Printf.fprintf stderr "Unix error: %s\n" (Unix.error_message e);
@@ -163,7 +163,11 @@ end = struct
    * rebase, and we don't log the recheck_end event until the update list
    * is no longer getting populated. *)
   let rec recheck_loop i rechecked_count genv env =
-    let raw_updates = DfindLib.get_changes (Utils.unsafe_opt genv.dfind) in
+    let dfind = match genv.dfind with
+    | Some dfind -> dfind
+    | None -> failwith "recheck_loop called without dfind set"
+    in
+    let raw_updates = DfindLib.get_changes dfind in
     if SSet.is_empty raw_updates then i, rechecked_count, env else begin
       let updates = Program.process_updates genv env raw_updates in
       let env, rechecked = recheck genv env updates in
@@ -178,6 +182,7 @@ end = struct
     let root = Options.root genv.options in
     let tmp_dir = Options.temp_dir genv.options in
     let env = ref env in
+    let rechecked = ref false in
     while true do
       let lock_file = FlowConfig.lock_file ~tmp_dir root in
       if not (Lock.check lock_file) then begin
@@ -191,9 +196,13 @@ end = struct
       end;
       ServerPeriodical.call_before_sleeping();
       let has_client = sleep_and_check socket in
-      let _, _, new_env = recheck_loop genv !env in
+      let _, rechecked_count, new_env = recheck_loop genv !env in
       env := new_env;
-      if has_client then handle_connection genv socket;
+      rechecked := !rechecked || (rechecked_count > 0);
+      if has_client then begin
+        handle_connection genv !rechecked socket;
+        rechecked := false
+      end;
       ServerEnv.invoke_async_queue ();
       EventLogger.flush ();
     done
@@ -246,7 +255,11 @@ end = struct
       * no server on the other end is an immediate error. *)
       let socket = Socket.init_unix_socket (FlowConfig.socket_file ~tmp_dir root) in
       let env = MainInit.go options program_init waiting_channel in
-      DfindLib.wait_until_ready (Utils.unsafe_opt genv.dfind);
+      let dfind = match genv.dfind with
+      | Some dfind -> dfind
+      | None -> failwith "dfind not set up in server mode"
+      in
+      DfindLib.wait_until_ready dfind;
       serve genv env socket
 
   (* The server can communicate with the process that forked it over a pipe.
@@ -305,6 +318,7 @@ end = struct
   let open_log_file options =
     let file = Path.to_string (Options.log_file options) in
     (try Sys.rename file (file ^ ".old") with _ -> ());
+    mkdir_no_fail (Filename.dirname file);
     Unix.openfile file [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND] 0o666
 
   let daemonize options =

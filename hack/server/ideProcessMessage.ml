@@ -9,19 +9,19 @@
 *)
 
 type typechecker_to_ide_message =
-  (* Let IDE process know that it's safe to access shared heap now *)
-  | RunIdeCommands
-  (* Let IDE process know that it should pause accessing shared heap. After
-   * sending it, you need to wait for IDE process to finish and confirm it by
-   * sending IdeCommandsDone before proceeding *)
-  | StopIdeCommands
+  | TypecheckerInitDone
   (* New FileInfo for a subset of paths. Typechecker never removes paths from
    * the map (deleted files are just updated with empty info), so all
    * updates are of the from "overwrite previous values for those paths with
    * new ones" *)
   | SyncFileInfo of FileInfo.t Relative_path.Map.t
+  | SyncErrorList of Errors.t
+  (* See comment on FindRefsCall *)
+  | FindRefsResponse of (IdeJson.call_id * FindRefsService.result)
 
 type ide_to_typechecker_message =
-  (* Let typechecker process know that we are done accessing shared heap until
-   * the next RunIdeCommands is received *)
-  | IdeCommandsDone
+  (* Finding all references is a heavyweight action that (in some cases)
+   * must be parallelized and will take multiple seconds anyway, so we don't
+   * want to do it in IDE process. Sending this message enqueues the request
+   * to be done by the typechecker process. *)
+  | FindRefsCall of (IdeJson.call_id * FindRefsService.action)

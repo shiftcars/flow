@@ -11,8 +11,7 @@
 open Utils_js
 open Sys_utils
 
-let version = "0.22.0"
-let flow_ext = ".flow"
+let version = "0.22.1"
 
 let default_temp_dir =
   Path.to_string @@
@@ -246,7 +245,7 @@ type config = {
   (* file blacklist *)
   ignores: string list;
   (* non-root include paths *)
-  includes: Path.t list;
+  includes: string list;
   (* library paths. no wildcards *)
   libs: Path.t list;
   (* config options *)
@@ -262,8 +261,6 @@ let add_dir_sep dir =
   else dir ^ dir_sep
 
 let file_of_root extension ~tmp_dir root =
-  (* TODO: move this to places that write this file *)
-  mkdir_no_fail tmp_dir;
   let tmp_dir = tmp_dir |> Path.make |> Path.to_string |> add_dir_sep in
   let root_part = Path.slash_escaped_string_of_path root in
   Printf.sprintf "%s%s.%s" tmp_dir root_part extension
@@ -290,7 +287,7 @@ end = struct
     List.iter (fun ex -> (fprintf o "%s\n" ex)) ignores
 
   let includes o includes =
-    List.iter (fun inc -> (fprintf o "%s\n" (Path.to_string inc))) includes
+    List.iter (fun inc -> (fprintf o "%s\n" inc)) includes
 
   let libs o libs =
     List.iter (fun lib -> (fprintf o "%s\n" (Path.to_string lib))) libs
@@ -347,63 +344,24 @@ let group_into_sections lines =
   let (section, section_lines) = section in
   List.rev ((section, List.rev section_lines)::sections)
 
-let dir_sep = Str.regexp_string Filename.dir_sep
-
-(* helper - eliminate noncanonical entries where possible.
-   no other normalization is done *)
-let fixup_path p =
-  let s = Path.to_string p in
-  let is_normalized = match realpath s with
-      | Some s' -> s' = s
-      | None -> false in
-  if is_normalized then p else
-  let abs = not (Filename.is_relative s) in
-  let entries = Str.split_delim dir_sep s in
-  let rec loop revbase entries =
-    match entries with
-    | h :: t when h = Filename.current_dir_name ->
-        loop revbase t
-    | h :: t when h = Filename.parent_dir_name -> (
-        match revbase with
-        | _ :: rt -> loop rt t
-        | _ -> loop (h :: revbase) t
-      )
-    | h :: t -> loop (h :: revbase) t
-    | [] -> List.rev revbase
-  in
-  let entries = loop [] entries in
-  let s = List.fold_left Filename.concat "" entries in
-  let s = if abs then Filename.dir_sep ^ s else s in
-  Path.make s
-
-let make_path_absolute config path =
-  if Filename.is_relative path
-  then Path.concat config.root path
-  else Path.make path
-
-let parse_path_matcher config lines =
+let trim_lines lines =
   lines
   |> List.map (fun (_, line) -> String.trim line)
   |> List.filter (fun s -> s <> "")
-  |> List.map (make_path_absolute config)
-  |> List.map fixup_path
 
 (* parse [include] lines *)
 let parse_includes config lines =
-  let includes = parse_path_matcher config lines in
+  let includes = trim_lines lines in
   { config with includes; }
 
 let parse_libs config lines =
   let libs = lines
-  |> List.map (fun (_, line) -> String.trim line)
-  |> List.filter (fun s -> s <> "")
-  |> List.map (make_path_absolute config) in
+  |> trim_lines
+  |> List.map (Files_js.make_path_absolute config.root) in
   { config with libs; }
 
 let parse_ignores config lines =
-  let ignores = lines
-  |> List.map (fun (_, line) -> String.trim line)
-  |> List.filter (fun s -> s <> "") in
+  let ignores = trim_lines lines in
   { config with ignores; }
 
 let parse_options config lines =
@@ -479,12 +437,12 @@ let parse_options config lines =
       flags = [ALLOW_DUPLICATE];
       optparser = optparse_string;
       setter = (fun opts v ->
-        if Utils.str_ends_with v flow_ext
+        if Utils.str_ends_with v Files_js.flow_ext
         then raise (Opts.UserError (
           "Cannot use file extension '" ^
           v ^
           "' since it ends with the reserved extension '"^
-          flow_ext^
+          Files_js.flow_ext^
           "'"
         ));
         let module_file_exts = SSet.add v opts.module_file_exts in
@@ -508,10 +466,33 @@ let parse_options config lines =
         let pattern = Str.matched_group 1 str in
         let template = Str.matched_group 2 str in
 
-        ((Str.regexp pattern, template), str)
+        (Str.regexp pattern, template)
       );
       setter = (fun opts v ->
-        let (v, _) = v in
+        let module_name_mappers = v :: opts.module_name_mappers in
+        {opts with module_name_mappers;}
+      );
+    }
+
+    |> define_opt "module.name_mapper.extension" {
+      _initializer = USE_DEFAULT;
+      flags = [ALLOW_DUPLICATE];
+      optparser = (fun str ->
+        let regexp_str = "^'\\([^']*\\)'[ \t]*->[ \t]*'\\([^']*\\)'$" in
+        let regexp = Str.regexp regexp_str in
+        (if not (Str.string_match regexp str 0) then
+          raise (Opts.UserError (
+            "Expected a mapping of form: " ^
+            "'single-quoted-string' -> 'single-quoted-string'"
+          ))
+        );
+
+        let file_ext = Str.matched_group 1 str in
+        let template = Str.matched_group 2 str in
+
+        (Str.regexp ("^\\(.*\\)\\." ^ (Str.quote file_ext) ^ "$"), template)
+      );
+      setter = (fun opts v ->
         let module_name_mappers = v :: opts.module_name_mappers in
         {opts with module_name_mappers;}
       );
@@ -675,15 +656,19 @@ let read root =
   let lines = List.mapi (fun i line -> (i+1, String.trim line)) lines in
   parse config lines
 
-let init root options =
+let init root ignores includes options =
   let file = fullpath root in
   if Sys.file_exists file
   then begin
     let msg = spf "Error: \"%s\" already exists!\n%!" file in
     FlowExitStatus.(exit ~msg Invalid_flowconfig)
   end;
+  let ignores_lines = List.map (fun s -> (1, s)) ignores in
+  let includes_lines = List.map (fun s -> (1, s)) includes in
   let options_lines = List.map (fun s -> (1, s)) options in
-  let config = parse_options (empty_config root) options_lines in
+  let config = parse_ignores (empty_config root) ignores_lines in
+  let config = parse_includes config includes_lines in
+  let config = parse_options config options_lines in
   let out = open_out_no_fail (fullpath root) in
   Pp.config out config;
   close_out_no_fail (fullpath root) out

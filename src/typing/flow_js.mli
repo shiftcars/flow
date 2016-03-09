@@ -10,13 +10,6 @@
 
 open Reason_js
 
-val new_warning: (reason * string) list -> Errors_js.error
-val new_error: (reason * string) list -> Errors_js.error
-
-val add_warning: Context.t -> ?trace:Trace.t -> (reason * string) list -> unit
-val add_error: Context.t -> ?trace:Trace.t -> (reason * string) list -> unit
-val add_internal_error: Context.t -> (reason * string) list -> unit
-
 val find_constraints:
   Context.t ->
   Constraint_js.ident ->
@@ -28,7 +21,7 @@ val flow: Context.t -> (Type.t * Type.use_t) -> unit
 val flow_t: Context.t -> (Type.t * Type.t) -> unit
 
 (* given a use type, return a tvar constrained by the use type *)
-val constrain: Context.t -> Type.use_t -> Type.t
+val tvar_with_constraint: Context.t -> Type.use_t -> Type.t
 
 val unify: Context.t -> Type.t -> Type.t -> unit
 
@@ -94,7 +87,9 @@ val dummy_prototype : Type.t
 val mk_objecttype : ?flags:Type.flags ->
   Type.dicttype option -> int -> Type.t -> Type.objtype
 
-val mk_object_with_proto : Context.t -> reason -> Type.t -> Type.t
+val mk_object_with_proto : Context.t -> reason ->
+  ?dict:Type.dicttype ->
+  Type.t -> Type.t
 val mk_object_with_map_proto : Context.t -> reason ->
   ?sealed:bool ->
   ?frozen:bool ->

@@ -62,6 +62,7 @@ MODULES=\
   hack/third-party/core\
   hack/utils\
   hack/utils/collections\
+  hack/utils/hh_json\
   hack/$(INOTIFY)\
   hack/$(FSNOTIFY)
 
@@ -87,6 +88,7 @@ OCAML_LIBRARIES=\
   bigarray
 
 NATIVE_LIBRARIES=\
+  pthread\
   $(ELF)
 
 FILES_TO_COPY=\

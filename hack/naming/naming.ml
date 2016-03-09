@@ -1058,7 +1058,6 @@ and xhp_category env x acc =
   | Method _ -> acc
   | TypeConst _ -> acc
 
-
 and class_require env c_kind x acc =
   match x with
   | Attributes _ -> acc
@@ -2224,7 +2223,8 @@ let typedef genv tdef =
   end;
   let attrs = user_attributes env tdef.t_user_attributes in
   {
-    N.t_tparams = tparaml;
+    N.t_pos = fst tdef.t_id;
+    t_tparams = tparaml;
     t_constraint = tconstraint;
     t_kind = hint env ty;
     t_user_attributes = attrs;

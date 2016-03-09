@@ -164,12 +164,7 @@ let do_parse ?(fail=true) ~types_mode ~info content file =
     let s = Printexc.to_string e in
     let msg = spf "unexpected parsing exception: %s" s in
     let loc = Loc.({ none with source = Some file }) in
-    let err = Errors_js.({
-      kind = ParseError;
-      messages = [BlameM (loc, msg)];
-      op = None;
-      trace = []
-    }) in
+    let err = Errors_js.(simple_error ~kind:ParseError loc msg) in
     Parse_err (Errors_js.ErrorSet.singleton err)
 
 (* parse file, store AST to shared heap on success.
@@ -184,7 +179,7 @@ let reducer ~types_mode (ok, skips, fails, errors) file =
          file, even if it is unchanged, since it might have been added to the
          modified set simply because a corresponding implementation file was
          also added. *)
-      if not (Loc.check_suffix file FlowConfig.flow_ext)
+      if not (Loc.check_suffix file Files_js.flow_ext)
         && ParserHeap.get_old file = Some (ast, info)
       then (ok, skips, fails, errors)
       else begin

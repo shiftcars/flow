@@ -52,6 +52,24 @@ Error:
 cond_prop.js:11:25,36: object type
 This type is incompatible with
 cond_prop.js:9:34,37: union: Name | ListType | NonNullType
+Member 1:
+cond_prop.js:3:13,16: Name
+Error:
+cond_prop.js:3:13,16: property `kind`
+Property not found in
+cond_prop.js:11:25,36: object type
+Member 2:
+cond_prop.js:3:20,27: ListType
+Error:
+cond_prop.js:3:20,27: property `kind`
+Property not found in
+cond_prop.js:11:25,36: object type
+Member 3:
+cond_prop.js:3:31,41: NonNullType
+Error:
+cond_prop.js:3:31,41: property `kind`
+Property not found in
+cond_prop.js:11:25,36: object type
 
 cond_prop.js:19:14,19: property `result`
 Property not found in
@@ -198,6 +216,10 @@ Error:
 mixed.js:68:17,17: boolean
 This type is incompatible with
 mixed.js:4:25,30: string
+
+mixed.js:76:8,15: mixed
+This type is incompatible with
+mixed.js:76:18,23: string
 
 not.js:5:5,5: boolean
 This type is incompatible with
@@ -530,4 +552,4 @@ void.js:85:7,12: undefined
 This type is incompatible with
 void.js:85:7,19: number
 
-Found 126 errors
+Found 127 errors

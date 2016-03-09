@@ -5,7 +5,7 @@ id: builtins
 title: Built-in Types
 permalink: /docs/builtins.html
 prev: quick-reference.html
-next: arrays.html
+next: syntax.html
 ---
 */
 
@@ -37,7 +37,7 @@ next: arrays.html
 */
 
 // $ExpectError
-(1 + 1: boolean); // Error: Numbers are not strings
+(1 + 1: string); // Error: Numbers are not strings
 ("Hello, World": string); // OK: Strings are strings
 
 class A {}
@@ -283,7 +283,7 @@ function typedJSON(x: mixed): JSON {
   if (typeof x === "object" && x !== null) {
     let o: JSONObject = {};
     for (let k of Object.keys(x)) {
-      o[k] = x[k];
+      o[k] = typedJSON(x[k]);
     }
     return o;
   }
@@ -307,8 +307,11 @@ function typedJSON(x: mixed): JSON {
 
   While type `boolean`, `number`, and `string` types admit `true` and `false`,
   any number, and any string, respectively, it can also be useful to specify a
-  type that admits a single value. For example, literal types can be used to
-  build enums.
+  type that admits a single value. This feature turns out to be surprisingly
+  [versatile](disjoint-unions.html): literal types can be used to build enums
+  and other disjoint unions, as well as express some common forms of method
+  overloading for which the types `boolean`, `number`, and `string` are not
+  adequate.
 */
 
 ("foo": "foo");

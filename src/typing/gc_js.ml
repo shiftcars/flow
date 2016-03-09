@@ -152,8 +152,8 @@ let rec gc cx state = function
   | MaybeT t ->
       gc cx state t
 
-  | IntersectionT (_, ts) ->
-      ts |> List.iter (gc cx state)
+  | IntersectionT (_, rep) ->
+      InterRep.members rep |> List.iter (gc cx state)
 
   | UnionT (_, rep) ->
       UnionRep.members rep |> List.iter (gc cx state)
@@ -239,8 +239,8 @@ and gc_use cx state = function
       funtype.params_tlist |> List.iter (gc cx state);
       gc cx state funtype.return_t
 
-  | ReposLowerT (_, t) ->
-      gc cx state t
+  | ReposLowerT (_, u) ->
+      gc_use cx state u
 
   | SetPropT(_, _, t) ->
       gc cx state t

@@ -10,12 +10,19 @@
 
 open Core
 
-type action = Ai.ServerFindRefs.action =
-  | Class of string
-  | Method of string * string
-  | Function of string
-
-type result = (string * Pos.absolute) list
+let to_json input =
+  let entries = List.map input begin fun (name, pos) ->
+    let filename = Pos.filename pos in
+    let line, start, end_ = Pos.info_pos pos in
+    Hh_json.JSON_Object [
+      "name", Hh_json.JSON_String name;
+      "filename", Hh_json.JSON_String filename;
+      "line", Hh_json.int_ line;
+      "char_start", Hh_json.int_ start;
+      "char_end", Hh_json.int_ end_;
+    ]
+  end in
+  Hh_json.JSON_Array entries
 
 let add_ns name =
   if name.[0] = '\\' then name else "\\" ^ name
@@ -56,11 +63,11 @@ let search_class class_name include_defs genv env =
 
 let get_refs action include_defs genv env =
   match action with
-  | Method (class_name, method_name) ->
+  | FindRefsService.Method (class_name, method_name) ->
       search_method class_name method_name include_defs genv env
-  | Function function_name ->
+  | FindRefsService.Function function_name ->
       search_function function_name include_defs genv env
-  | Class class_name ->
+  | FindRefsService.Class class_name ->
       search_class class_name include_defs genv env
 
 let get_refs_with_defs action genv env =

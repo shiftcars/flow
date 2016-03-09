@@ -42,7 +42,6 @@ MODULES=\
   globals\
   h2tp/common\
   h2tp/mapper\
-  h2tp/test\
   h2tp/unparser\
   h2tp\
   heap\
@@ -62,6 +61,7 @@ MODULES=\
   typing\
   utils\
   utils/collections\
+  utils/hh_json\
   monitor\
   watchman\
   $(FSNOTIFY)\
@@ -96,7 +96,7 @@ NATIVE_LIBRARIES=\
 
 TARGETS=_build/hh_server.native _build/hh_client.native \
 		_build/hh_single_type_check.native _build/hh_emitter.native \
-		_build/hh_format.native _build/h2tp.native _build/test_unparser.native \
+		_build/hh_format.native _build/h2tp.native \
 		_build/hh_match.native \
 		_build/code_extent_tests.native \
 		_build/matcher_test.native \

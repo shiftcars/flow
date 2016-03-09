@@ -166,7 +166,8 @@ and _json_of_t_impl json_cx t = Hh_json.(
       "type", _json_of_t json_cx t
     ]
 
-  | IntersectionT (_, ts) -> [
+  | IntersectionT (_, rep) -> [
+      let ts = InterRep.members rep in
       "types", JSON_Array (List.map (_json_of_t json_cx) ts)
     ]
 
@@ -298,8 +299,8 @@ and _json_of_use_t_impl json_cx t = Hh_json.(
       "funType", json_of_funtype json_cx funtype
     ]
 
-  | ReposLowerT (_, t) -> [
-      "type", _json_of_t json_cx t
+  | ReposLowerT (_, use_t) -> [
+      "type", _json_of_use_t json_cx use_t
     ]
 
   | SetPropT (_, name, t)
@@ -1102,7 +1103,7 @@ let string_of_scope_refis cx refis = Scope.(
 )
 
 let string_of_scope cx scope = Scope.(
-  Utils.spf "{ kind: %s;\nentries:\n%s\nrefis:\n%s\n}"
+  spf "{ kind: %s;\nentries:\n%s\nrefis:\n%s\n}"
     (string_of_kind scope.kind)
     (string_of_scope_entries cx scope.entries)
     (string_of_scope_refis cx scope.refis)
